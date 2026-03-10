@@ -42,11 +42,9 @@ function parseCSV(text) {
     .slice(1)
     .map(line => {
       const cells = parseLine(line);
-      const row = {};
-      headers.forEach((h, i) => { row[h] = cells[i] ?? ''; });
-      return row;
+      return headers.map((_, i) => cells[i] ?? '');
     })
-    .filter(r => Object.values(r).some(v => v !== ''));
+    .filter(r => r.some(v => v !== ''));
 
   return { headers, rows };
 }
@@ -77,23 +75,23 @@ function cleanEMPLID(id) {
  * correspond to the same question.
  */
 function identifyQuestionColumns(headers, rows) {
-  const answerCols = [];
-  const scoreCols = [];
+  const answerColIdxs = [];
+  const scoreColIdxs = [];
 
-  for (const h of headers) {
-    if (METADATA_KEYS.has(h.toLowerCase().trim())) continue;
+  for (let i = 0; i < headers.length; i++) {
+    if (METADATA_KEYS.has(headers[i].toLowerCase().trim())) continue;
 
-    const vals = rows.map(r => (r[h] || '').trim()).filter(v => v !== '');
+    const vals = rows.map(r => (r[i] || '').trim()).filter(v => v !== '');
     if (!vals.length) continue;
 
     if (vals.every(v => /^[A-Ea-e]$/.test(v))) {
-      answerCols.push(h);
+      answerColIdxs.push(i);
     } else if (vals.every(v => /^[01]$/.test(v))) {
-      scoreCols.push(h);
+      scoreColIdxs.push(i);
     }
   }
 
-  return { answerCols, scoreCols };
+  return { answerColIdxs, scoreColIdxs };
 }
 
 /**
@@ -211,24 +209,27 @@ export default function App() {
     if (!detectedTestId)      { setError('No Test ID found — please upload the Test IDs reference file.'); return; }
 
     const { headers, rows } = parsedCSV;
-    const { answerCols, scoreCols } = identifyQuestionColumns(headers, rows);
+    const { answerColIdxs, scoreColIdxs } = identifyQuestionColumns(headers, rows);
 
-    if (!answerCols.length) {
+    if (!answerColIdxs.length) {
       setError('Could not identify question columns. Make sure this is a Canvas Student Analysis Report CSV.');
       return;
     }
 
+    const sisIdIdx = headers.indexOf('sis_id');
+    const idIdx    = headers.indexOf('id');
+
     const outputRows = [];
 
-    for (const studentRow of rows) {
-      const rawId = studentRow['sis_id'] || studentRow['id'] || '';
-      const emplid = cleanEMPLID(rawId);
-      if (!emplid) continue;
+    for (let qi = 0; qi < answerColIdxs.length; qi++) {
+      for (const studentRow of rows) {
+        const rawId = studentRow[sisIdIdx] ?? studentRow[idIdx] ?? '';
+        const emplid = cleanEMPLID(rawId);
+        if (!emplid) continue;
 
-      for (let qi = 0; qi < answerCols.length; qi++) {
-        const answer  = (studentRow[answerCols[qi]] || '').trim().toUpperCase();
-        const correct = scoreCols[qi]
-          ? parseInt(studentRow[scoreCols[qi]] || '0')
+        const answer  = (studentRow[answerColIdxs[qi]] || '').trim().toUpperCase();
+        const correct = scoreColIdxs[qi] !== undefined
+          ? parseInt(studentRow[scoreColIdxs[qi]] || '0')
           : 0;
 
         outputRows.push({
@@ -239,7 +240,7 @@ export default function App() {
           TYPE:           'Post',
           QUESTIONID:     qi + 1,
           EFFECTIVEDATE:  effectiveDate,
-          STUDENTANSWER:  answer,
+          ANSWEROPTION:   answer,
           STUDENTCORRECT: isNaN(correct) ? 0 : correct,
         });
       }
@@ -251,7 +252,7 @@ export default function App() {
     }
 
     const students = new Set(outputRows.map(r => r.EMPLID)).size;
-    setPreview({ rows: outputRows, students, questions: answerCols.length, total: outputRows.length });
+    setPreview({ rows: outputRows, students, questions: answerColIdxs.length, total: outputRows.length });
     setDownloaded(false);
   }
 
@@ -261,7 +262,7 @@ export default function App() {
     if (!preview) return;
 
     const wb = XLSX.utils.book_new();
-    const headerRow = ['EMPLID', 'TERM', 'CLASSNUMBER', 'TESTID', 'TYPE', 'QUESTIONID', 'EFFECTIVEDATE', 'STUDENTANSWER', 'STUDENTCORRECT'];
+    const headerRow = ['EMPLID', 'TERM', 'CLASSNUMBER', 'TESTID', 'TYPE', 'QUESTIONID', 'EFFECTIVEDATE', 'ANSWEROPTION', 'STUDENTCORRECT'];
     const aoa = [headerRow];
     const dateSerial = toExcelDateSerial(effectiveDate);
 
@@ -274,7 +275,7 @@ export default function App() {
         row.TYPE,
         row.QUESTIONID,
         dateSerial,        // stored as a number, formatted below
-        row.STUDENTANSWER,
+        row.ANSWEROPTION,
         row.STUDENTCORRECT,
       ]);
     }
@@ -307,7 +308,7 @@ export default function App() {
       { wch: 8  }, // TYPE
       { wch: 12 }, // QUESTIONID
       { wch: 14 }, // EFFECTIVEDATE
-      { wch: 16 }, // STUDENTANSWER
+      { wch: 16 }, // ANSWEROPTION
       { wch: 16 }, // STUDENTCORRECT
     ];
 
