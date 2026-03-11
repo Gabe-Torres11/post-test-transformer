@@ -57,10 +57,13 @@ function identifyQuestionColumns(headers, rows) {
     const vals = rows.map(r => (r[i] || '').trim()).filter(v => v !== '');
     if (!vals.length) continue;
 
-    if (vals.every(v => /^[A-Ea-e]$/.test(v))) {
-      answerColIdxs.push(i);
-    } else if (vals.every(v => /^[01]$/.test(v))) {
+    if (vals.every(v => /^[01]$/.test(v))) {
+      // Score column — always 0 or 1
       scoreColIdxs.push(i);
+    } else if (!vals.every(v => /^[01]$/.test(v)) && vals.some(v => v.length > 0)) {
+      // Answer column — either single letters (A/B/C/D) OR full answer text.
+      // Both formats are valid Canvas exports and both are stored as-is.
+      answerColIdxs.push(i);
     }
   }
 
